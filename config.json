@@ -1,0 +1,13 @@
+{
+  "areas": [
+    "1006",
+    "997",
+    "1115"
+  ],
+  "igAccounts": [],
+  "igQueries": [],
+  "igDefaultDays": 7,
+  "newsDefaultDays": 10,
+  "recurringDays": 30,
+  "talabatGraceDays": 1
+}

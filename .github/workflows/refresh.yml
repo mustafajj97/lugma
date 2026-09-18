@@ -1,0 +1,76 @@
+name: Refresh offers
+
+on:
+  schedule:
+    - cron: "0 3 * * *"      # every day at 06:00 Bahrain time
+  workflow_dispatch:          # the app's Refresh button (or "Run workflow" on GitHub)
+    inputs:
+      sources:
+        description: "What to refresh"
+        type: choice
+        default: "news,instagram,talabat"
+        options:
+          - "news,instagram,talabat"    # full, ~20 min
+          - "news,instagram"            # quick, ~3 min
+
+permissions:
+  contents: write     # the monthly keep-alive commit below
+  pages: write        # publish the site
+  id-token: write     # required by GitHub Pages
+
+concurrency:
+  group: refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      # Starts from what's live on the site (so offers and Instagram finds carry over),
+      # collects new offers, drops expired ones, writes web/data/.
+      - name: Collect offers
+        id: collect
+        continue-on-error: true
+        run: python refresh.py --sources "${{ inputs.sources || 'news,instagram,talabat' }}" --prev-url "${{ steps.pages.outputs.base_url }}"
+
+      # Publish even if a source failed: expired offers still need removing, other sources still update
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      # GitHub pauses scheduled jobs in public repos after 60 days without a commit.
+      # A tiny commit every ~25 days keeps the daily refresh running forever.
+      - name: Keep the daily schedule alive
+        run: |
+          age=$(( $(date +%s) - $(git log -1 --format=%ct) ))
+          if [ "$age" -gt 2160000 ]; then
+            date -u +%FT%TZ > .last-refresh
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .last-refresh
+            git commit -m "Keep daily refresh active"
+            git push
+          fi
+
+      # Mark the run failed (GitHub emails you) when Talabat couldn't be refreshed
+      - name: Flag failed refresh
+        if: steps.collect.outcome == 'failure'
+        run: |
+          echo "::error::Talabat refresh failed — see the 'Collect offers' step. Old offers expire within a day."
+          exit 1

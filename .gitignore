@@ -1,0 +1,5 @@
+# live data is produced by the daily job and fetched back from the site
+web/data/
+__pycache__/
+*.pyc
+*.tmp
