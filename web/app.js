@@ -20,7 +20,7 @@ const state = {
   local: false,          // true when running on the PC server (Refresh + Settings available)
   offers: [], cuisines: [], sources: {}, today: bhToday(), generatedAt: null,
   q: "", cuisine: new Set(), channel: "all", src: new Set(Object.keys(SOURCES)),
-  minPct: 0, area: "", sort: "pct", newOnly: false, shown: PAGE, deals: new Set(),
+  minPct: 0, area: "", sort: "pct", newOnly: false, shown: PAGE, deals: new Set(), showWrong: false,
 };
 
 // persist filters between visits (per-browser convenience only)
@@ -45,6 +45,57 @@ async function api(path, opts = {}) {
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
+}
+
+// ---------- verification: you check offers against the app / the restaurant ----------
+// A check is tied to the offer's fingerprint (its exact dishes + prices). If the offer changes,
+// the old check no longer applies and the offer shows as unconfirmed again.
+function myChecks() { try { return JSON.parse(localStorage.getItem("lugma.checks") || "{}"); } catch { return {}; } }
+function saveChecks(c) { try { localStorage.setItem("lugma.checks", JSON.stringify(c)); } catch {} }
+function checkOf(o) {
+  const c = myChecks()[o.id];
+  if (c && c.fp === o.fp) return c;                                      // checked on this phone
+  if (o.verified) return { verdict: "ok", at: o.verified, synced: true }; // confirmed earlier (synced)
+  if (o.wrong) return { verdict: "wrong", at: o.wrong, synced: true };     // marked wrong earlier (synced)
+  return null;
+}
+
+let syncTimer = null;
+function setCheck(o, verdict) {
+  const all = myChecks();
+  if (verdict === "clear") all[o.id] = { fp: o.fp, verdict: "clear", at: new Date().toISOString(), name: o.restaurant };
+  else all[o.id] = { fp: o.fp, verdict, at: new Date().toISOString(), name: o.restaurant };
+  saveChecks(all);
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncChecks, 4000);     // batch several taps into one upload
+}
+
+// Send your checks to GitHub so the daily refresh respects them (needs the Refresh key).
+// Always sends every recent check — merging is idempotent, so a lost or replaced upload can't drop any.
+async function syncChecks() {
+  if (!ghConf() || state.local) return;
+  const all = myChecks();
+  const cutoff = Date.now() - 60 * 864e5;
+  const list = Object.entries(all).filter(([, c]) => Date.parse(c.at) > cutoff)
+    .map(([id, c]) => ({ id, fp: c.fp, verdict: c.verdict, at: c.at, name: c.name }));
+  if (!list.length || list.every(x => all[x.id].synced)) return;
+  try {
+    const branch = (await gh("")).default_branch || "main";
+    await gh(`/actions/workflows/${WORKFLOW}/dispatches`, { method: "POST",
+      body: JSON.stringify({ ref: branch, inputs: { sources: "none", feedback: JSON.stringify(list) } }) });
+    for (const x of list) all[x.id].synced = true;
+    saveChecks(all);
+  } catch (e) { toast(`Your check is saved on this phone, but couldn't be sent to GitHub: ${e.message}`); }
+}
+
+let toastTimer = null;
+function toast(html, undo) {
+  const t = $("#toast");
+  t.innerHTML = `<span>${html}</span>` + (undo ? `<button class="textbtn" id="toastUndo">Undo</button>` : "");
+  t.hidden = false;
+  if (undo) $("#toastUndo").onclick = () => { undo(); t.hidden = true; };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 6000);
 }
 
 // Offers you add yourself are saved on this device only
@@ -137,6 +188,7 @@ function itemHit(o, i, toks, textOnItems = toks.length > 0 && o.items.some(x => 
 function matches(o, toks, ignoreCuisine = false, ignoreDeals = false) {
   if (!state.src.has(o.source)) return false;
   if (o.validUntil && o.validUntil < state.today) return false;   // expired: never shown
+  if (!state.showWrong && checkOf(o)?.verdict === "wrong") return false;   // you said it isn't real
   if (state.channel !== "all" && o.channel !== state.channel && o.channel !== "both") return false;
   if (state.minPct && o.maxPct < state.minPct) return false;
   if (state.area && !(o.areas || []).includes(state.area)) return false;
@@ -239,7 +291,7 @@ function validity(o) {
   if (o.source === "talabat") {
     const h = o.checkedAt ? Math.max(0, Math.round((Date.now() - Date.parse(o.checkedAt)) / 36e5)) : null;
     const when = h == null ? "" : h < 1 ? "just now" : h < 24 ? `${h}h ago` : `${Math.round(h / 24)} days ago`;
-    return { line: when ? `Price checked on Talabat ${when}` : "" };
+    return { line: when ? `Prices from Talabat's website, read ${when}. The Talabat app can differ — check before ordering.` : "" };
   }
   if (o.source === "manual") return { badge: o.validUntil ? `<span class="badge warn">${ends}</span>` : "" };
   if (o.validHow === "stated") return { badge: `<span class="badge warn">${ends}</span>`, line: "End date from the post" };
@@ -247,6 +299,18 @@ function validity(o) {
   return { line: `No end date given · hidden after ${fmtDay(o.validUntil)}` };
 }
 function daysBetween(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 864e5); }
+
+function checkRow(o) {
+  const c = checkOf(o);
+  const where = o.source === "talabat" ? "in the Talabat app" : o.source === "instagram" ? "on the post" : "in the story";
+  if (c?.verdict === "ok") return `<div class="verify ok">✓ You confirmed this ${new Date(c.at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Bahrain" })}
+      <button class="textbtn" data-check="clear" data-id="${esc(o.id)}">undo</button></div>`;
+  if (c?.verdict === "wrong") return `<div class="verify wrong">✗ You said this isn't real — hidden from results
+      <button class="textbtn" data-check="clear" data-id="${esc(o.id)}">undo</button></div>`;
+  return `<div class="verify"><span>Is this deal real ${where}?</span>
+      <button class="vbtn yes" data-check="ok" data-id="${esc(o.id)}">✓ Yes</button>
+      <button class="vbtn no" data-check="wrong" data-id="${esc(o.id)}">✗ Not there</button></div>`;
+}
 
 // Every card ends with where the offer came from, so it can be checked at the source
 function sourceLink(o) {
@@ -314,6 +378,7 @@ function card(o, toks) {
     ${body}
     ${areas !== "<span></span>" || del ? `<div class="card-foot">${areas}${del}</div>` : ""}
     ${sourceLink(o)}
+    ${o.source === "manual" ? "" : checkRow(o)}
   </article>`;
 }
 
@@ -330,6 +395,10 @@ function render(resetPage = false) {
     o._pct = o._focused ? Math.max(...o._hits.map(i => i.pct)) : o.maxPct;   // best deal among what you asked for
   }
   current = sorted(current);
+  if (toks.length) {
+    const byName = o => toks.every(k => (o.restaurant || "").toLowerCase().includes(k)) ? 0 : 1;
+    current = current.map((o, i) => [o, i]).sort((a, b) => byName(a[0]) - byName(b[0]) || a[1] - b[1]).map(x => x[0]);
+  }
   const items = current.reduce((n, o) => n + (o._focused ? o._hits.length : o.items.length), 0);
   $("#results").innerHTML = current.slice(0, state.shown).map(o => card(o, toks)).join("");
   $("#moreBtn").hidden = current.length <= state.shown;
@@ -363,6 +432,12 @@ function footer() {
   $("#foot").innerHTML = (parts.length ? parts.join(" · ") : "Not refreshed yet") +
     `<br>Expired offers are hidden automatically. Talabat offers disappear if a refresh hasn't re-confirmed them within a day; ` +
     `Instagram and news offers use the end date in the post, or a short window after posting if none is given. Always check the post for conditions.`;
+  const wrongHere = state.offers.filter(o => checkOf(o)?.verdict === "wrong").length;
+  const confirmed = state.offers.filter(o => checkOf(o)?.verdict === "ok").length;
+  $("#foot").innerHTML += `<br><b>Your checks:</b> ${confirmed} confirmed · ${wrongHere} marked not real` +
+    (wrongHere ? ` · <button class="textbtn" id="toggleWrong">${state.showWrong ? "hide them" : "show them"}</button>` : "") +
+    (ghConf() || state.local ? "" : ` · <span class="muted">saved on this phone only — add the Refresh key (tap Refresh) to share them with the daily refresh</span>`);
+  $("#toggleWrong")?.addEventListener("click", () => { state.showWrong = !state.showWrong; render(true); footer(); });
   const up = $("#updated");
   if (up) up.textContent = state.generatedAt ? `Updated ${agoTime(state.generatedAt)}` : "";
 }
@@ -671,6 +746,18 @@ $("#results").addEventListener("click", async e => {
     x.remove();
     return;
   }
+  const v = e.target.closest("[data-check]");
+  if (v) {
+    const o = state.offers.find(x => x.id === v.dataset.id);
+    const verdict = v.dataset.check;
+    const before = myChecks()[o.id];
+    setCheck(o, verdict);
+    const undo = () => { const all = myChecks(); if (before) all[o.id] = before; else delete all[o.id]; saveChecks(all); setCheck(o, before?.verdict || "clear"); render(); footer(); };
+    if (verdict === "wrong") toast(`Hidden <b>${esc(o.restaurant)}</b>. It stays hidden unless the deal changes.`, undo);
+    else if (verdict === "ok") toast(`Marked <b>${esc(o.restaurant)}</b> as confirmed.`, undo);
+    render(); footer();
+    return;
+  }
   const d = e.target.closest("[data-del]");
   if (d && confirm("Remove this offer?")) { saveMine(myOffers().filter(o => o.id !== d.dataset.del)); load(); }
   const cap = e.target.closest(".caption");
@@ -707,5 +794,18 @@ document.addEventListener("visibilitychange", () => {
 });
 let lastLoad = Date.now();
 if ("serviceWorker" in navigator && !state.local && location.protocol === "https:") {
-  addEventListener("load", () => setTimeout(() => navigator.serviceWorker.register("sw.js").catch(() => {}), 1500));
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  // a new version took over: reload once so you see it now, not on the open after next
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+  });
+  addEventListener("load", () => setTimeout(async () => {
+    try {
+      const reg = await navigator.serviceWorker.register("sw.js", { updateViaCache: "none" });
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+    } catch {}
+  }, 1000));
 }
+// retry sending any checks that didn't reach GitHub yet
+setTimeout(syncChecks, 5000);

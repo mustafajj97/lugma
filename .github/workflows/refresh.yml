@@ -3,10 +3,10 @@ name: Refresh offers
 on:
   push:                       # app changes go live in ~1 min (republishes current offers, no re-collecting)
     branches: [main]
-    paths-ignore: [".last-refresh", "README.md"]
+    paths-ignore: [".last-refresh", "README.md", "feedback.json"]
   schedule:
     - cron: "0 3 * * *"      # every day at 06:00 Bahrain time
-  workflow_dispatch:          # the app's Refresh button (or "Run workflow" on GitHub)
+  workflow_dispatch:          # the app's Refresh button and ✓/✗ checks (or "Run workflow" on GitHub)
     inputs:
       sources:
         description: "What to refresh"
@@ -15,9 +15,14 @@ on:
         options:
           - "news,instagram,talabat"    # full, ~20 min
           - "news,instagram"            # quick, ~3 min
+          - "none"                      # just save your ✓/✗ checks and republish, ~1 min
+      feedback:
+        description: "Your checks from the app (JSON, sent by the app)"
+        type: string
+        default: ""
 
 permissions:
-  contents: write     # the monthly keep-alive commit below
+  contents: write     # saves feedback.json + the monthly keep-alive commit
   pages: write        # publish the site
   id-token: write     # required by GitHub Pages
 
@@ -42,12 +47,27 @@ jobs:
       - id: pages
         uses: actions/configure-pages@v5
 
-      # Starts from what's live on the site (so offers and Instagram finds carry over),
-      # collects new offers, drops expired ones, writes web/data/.
+      # Starts from what's live on the site (so offers and Instagram finds carry over), saves any
+      # ✓/✗ checks sent from the app, collects new offers, drops expired and wrong ones.
       - name: Collect offers
         id: collect
         continue-on-error: true
-        run: python refresh.py --sources "${{ github.event_name == 'push' && 'none' || inputs.sources || 'news,instagram,talabat' }}" --prev-url "${{ steps.pages.outputs.base_url }}"
+        env:
+          FEEDBACK: ${{ inputs.feedback }}      # passed as data, never pasted into the shell
+          SOURCES: ${{ github.event_name == 'push' && 'none' || inputs.sources || 'news,instagram,talabat' }}
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: python refresh.py --sources "$SOURCES"
+
+      # Your checks live in the repo so every future refresh respects them
+      - name: Save your checks
+        run: |
+          if [ -n "$(git status --porcelain feedback.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add feedback.json
+            git commit -m "Save offer checks from the app"
+            git pull --rebase -q && git push
+          fi
 
       # Publish even if a source failed: expired offers still need removing, other sources still update
       - uses: actions/upload-pages-artifact@v3
@@ -70,7 +90,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add .last-refresh
             git commit -m "Keep daily refresh active"
-            git push
+            git pull --rebase -q && git push
           fi
 
       # Mark the run failed (GitHub emails you) when Talabat couldn't be refreshed

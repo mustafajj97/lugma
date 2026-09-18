@@ -5,7 +5,13 @@ expired, and writes the files the web app reads:
 
     web/data/offers.json   everything the app shows (published)
     web/data/state.json    bookkeeping between runs: first-seen dates, Instagram query rotation
+
+Verification: feedback.json (in the repo) holds what you checked in the app — "ok" (confirmed on
+Talabat / at the restaurant) or "wrong" (not there). Each verdict is tied to the offer's fingerprint
+(the exact set of discounted dishes and prices), so a verdict lapses as soon as the offer changes.
+Offers marked wrong are flagged `wrong` and hidden by the app (kept in the file so undo works).
 """
+import hashlib
 import json
 import os
 import traceback
@@ -16,6 +22,7 @@ from collectors import cuisine, freshness, instagram, news, talabat
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(ROOT, "web", "data")
 CONFIG = os.path.join(ROOT, "config.json")
+FEEDBACK = os.path.join(ROOT, "feedback.json")
 BAHRAIN = timezone(timedelta(hours=3))
 
 DEFAULT_CONFIG = {
@@ -78,6 +85,58 @@ def _slim(o):
     return o
 
 
+def fingerprint(o):
+    """Identifies this exact version of an offer: for Talabat, which dishes are discounted and at what
+    price; for posts/stories, the post itself. A verdict only applies while this stays the same."""
+    if o["source"] == "talabat" and o.get("items"):
+        basis = sorted(f"{i['name'].strip().lower()}|{i['now']}" for i in o["items"])
+    else:
+        basis = [o["id"], o.get("title", "")]
+    return hashlib.sha1("\n".join(basis).encode()).hexdigest()[:12]
+
+
+def merge_feedback(entries):
+    """Add verdicts sent from the app: [{id, fp, verdict: ok|wrong|clear, at}]. Latest wins."""
+    fb = load_json(FEEDBACK, {})
+    changed = 0
+    for e in entries:
+        if not isinstance(e, dict) or not e.get("id"):
+            continue
+        if e.get("verdict") == "clear":
+            changed += fb.pop(e["id"], None) is not None
+            continue
+        if e.get("verdict") not in ("ok", "wrong") or not e.get("fp"):
+            continue
+        old = fb.get(e["id"])
+        if not old or (e.get("at") or "") >= (old.get("at") or ""):
+            fb[e["id"]] = {"fp": e["fp"], "verdict": e["verdict"], "at": e.get("at") or now_iso(),
+                           "name": str(e.get("name", ""))[:80]}
+            changed += 1
+    with open(FEEDBACK, "w", encoding="utf-8") as f:
+        json.dump(fb, f, ensure_ascii=False, indent=1, sort_keys=True)
+    return changed
+
+
+def apply_feedback(offers):
+    """Returns (offers, number marked wrong). Confirmed offers get `verified`, wrong ones `wrong`
+    (the app hides those). They stay in the file so an undo brings them straight back."""
+    fb = load_json(FEEDBACK, {})
+    out, wrong = [], 0
+    for o in offers:
+        f = fb.get(o["id"])
+        o = dict(o)
+        o.pop("verified", None)
+        o.pop("wrong", None)
+        if f and f.get("fp") == o.get("fp"):
+            if f["verdict"] == "wrong":
+                o["wrong"] = f["at"]
+                wrong += 1
+            else:
+                o["verified"] = f["at"]
+        out.append(o)
+    return out, wrong
+
+
 def normalize(o):
     """Re-apply the current classification rules to an offer, so rule changes reach the live
     data straight away instead of waiting for the next full refresh."""
@@ -89,6 +148,7 @@ def normalize(o):
             i["cuisines"] = cuisine.classify(text=i["name"])
     elif o["source"] == "news" and "news.google.com" in (o.get("url") or ""):
         o["url"] = news.resolve_google_news(o["url"]) or o["url"]
+    o["fp"] = fingerprint(o)
     return o
 
 
@@ -149,6 +209,9 @@ class Store:
         if touch or not self.db.get("generatedAt"):
             self.db["generatedAt"] = now_iso()
         self.db["cuisines"] = cuisine.ORDER
+        # your ✓/✗ checks are attached to each offer; the app hides the ones marked wrong
+        self.db["offers"], self.db["markedWrong"] = apply_feedback(self.db["offers"])
+        self.db.pop("hiddenAsWrong", None)
         save_json(self.offers_path, self.db)
         save_json(self.state_path, self.state)
 

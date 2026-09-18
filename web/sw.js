@@ -1,8 +1,8 @@
 // Lugma service worker: opens instantly and works offline.
-// - App files: served from cache, refreshed in the background (stale-while-revalidate).
+// - App files: network first (so updates show up on the next open), cached copy when offline.
 // - Offers data: always tries the network first so you see today's offers; falls back to the
 //   last copy when offline. The page itself hides anything past its end date either way.
-const CACHE = "lugma-v3";
+const CACHE = "lugma-v4";
 const SHELL = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png"];
 
 self.addEventListener("install", e => {
@@ -29,11 +29,8 @@ self.addEventListener("fetch", e => {
   }
 
   e.respondWith(
-    caches.match(e.request, { ignoreSearch: true }).then(hit => {
-      const net = fetch(e.request)
-        .then(res => { if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone())); return res; })
-        .catch(() => hit);
-      return hit || net;
-    })
+    fetch(e.request, { cache: "no-cache" })
+      .then(res => { if (res.ok) caches.open(CACHE).then(c => c.put(e.request, res.clone())); return res; })
+      .catch(() => caches.match(e.request, { ignoreSearch: true }))
   );
 });

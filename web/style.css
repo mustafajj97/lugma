@@ -108,6 +108,21 @@ code { font: 12.5px ui-monospace, Consolas, monospace; background: var(--surface
 .source.none { color: var(--muted); font-weight: 500; }
 .match-line { color: var(--good); font-weight: 600; }
 
+/* verification row */
+.verify { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; color: var(--ink-2); }
+.verify > span { flex: 1 1 100%; }
+.verify.ok { color: var(--good); font-weight: 600; }
+.verify.wrong { color: var(--accent); font-weight: 600; }
+.verify .textbtn { margin-left: auto; font-weight: 500; }
+.vbtn { flex: 1; border: 1px solid var(--line); background: var(--surface); border-radius: 9px; padding: 8px 10px; font-weight: 600; font-size: 13.5px; cursor: pointer; }
+.vbtn.yes { color: var(--good); }
+.vbtn.no { color: var(--accent); }
+.vbtn:hover { background: var(--surface-2); }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 50;
+  background: var(--ink); color: var(--bg); border-radius: 12px; padding: 11px 14px; font-size: 14px; display: flex; gap: 14px; align-items: center;
+  width: min(520px, calc(100vw - 24px)); box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+.toast .textbtn { color: var(--bg); text-decoration: underline; flex: none; }
+
 /* chips + filters */
 .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 18px 0 12px; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: 13.5px; font-weight: 500; }

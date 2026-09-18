@@ -7,6 +7,7 @@
 Exits with code 1 if Talabat (the main source) failed, so GitHub emails you.
 """
 import argparse
+import json
 import os
 import sys
 import time
@@ -54,9 +55,17 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--sources", default="news,instagram,talabat")
     ap.add_argument("--prev-url", default=os.environ.get("SITE_URL", ""))
+    ap.add_argument("--feedback", default=os.environ.get("FEEDBACK", ""),
+                    help="JSON list of your checks from the app: [{id, fp, verdict: ok|wrong|clear, at}]")
     a = ap.parse_args()
     if a.prev_url:
         fetch_previous(a.prev_url)
+    if a.feedback.strip():
+        try:
+            n = engine.merge_feedback(json.loads(a.feedback))
+            log(f"Saved {n} check(s) from the app into feedback.json")
+        except ValueError as e:
+            log(f"Ignoring malformed feedback: {e}")
     wanted = [s for s in ("news", "instagram", "talabat") if s in a.sources.split(",")]
     if not wanted:   # "none": just republish the current offers (used when the app's code changes)
         if not os.path.exists(os.path.join(engine.DATA_DIR, "offers.json")):
