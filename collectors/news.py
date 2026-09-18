@@ -2,12 +2,37 @@
 app-wide campaigns (Keeta / Jahez / Talabat), hotel brunch and buffet deals."""
 import hashlib
 import html
+import json
 import re
 import urllib.parse
+import urllib.request
 from email.utils import parsedate_to_datetime
 
 from .cuisine import classify
-from .net import get
+from .net import UA, get
+
+
+def resolve_google_news(link):
+    """Turn a news.google.com article link into the publisher's URL (same RPC the Google News
+    page itself uses). Returns None if Google changes the format — the redirect link still works."""
+    if "news.google.com" not in link:
+        return link
+    try:
+        page = get(link, retries=1)
+        grab = lambda attr: (re.search(rf'data-n-a-{attr}="([^"]+)"', page) or [None, None])[1]
+        aid, ts, sg = grab("id"), grab("ts"), grab("sg")
+        if not (aid and ts and sg):
+            return None
+        inner = ["garturlreq", [["X", "X", ["X", "X"], None, None, 1, 1, "US:en", None, 1, None, None, None, None, None, 0, 1],
+                                "X", "X", 1, [1, 1, 1], 1, 1, None, 0, 0, None, 0], aid, int(ts), sg]
+        body = "f.req=" + urllib.parse.quote(json.dumps([[["Fbv4je", json.dumps(inner), None, "generic"]]]))
+        req = urllib.request.Request("https://news.google.com/_/DotsSplashUi/data/batchexecute", data=body.encode(),
+                                     headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", "User-Agent": UA})
+        txt = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+        m = re.search(r'https?://(?!news\.google|www\.google)[^\\"\s]+', txt)
+        return m.group(0) if m else None
+    except Exception:
+        return None
 
 QUERIES = [
     "bahrain restaurant offer", "bahrain restaurant promotion", "bahrain food deal", "bahrain dining offer",
@@ -61,5 +86,11 @@ def collect(log, days=30):
                 "items": [], "maxPct": max(pct) if pct else 0,
                 "url": link, "image": "", "rating": None, "areas": [], "date": d,
             }
-    log(f"News: {len(found)} food-offer stories from the last {days} days")
+    # Google News links are redirects — swap them for the publisher's own article URL
+    resolved = 0
+    for o in found.values():
+        real = resolve_google_news(o["url"])
+        if real:
+            o["url"], resolved = real, resolved + 1
+    log(f"News: {len(found)} food-offer stories from the last {days} days ({resolved} linked to the publisher)")
     return list(found.values())

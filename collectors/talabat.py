@@ -8,7 +8,7 @@ import time
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from .cuisine import classify
+from .cuisine import classify, primary
 from .net import get
 
 BASE = "https://www.talabat.com"
@@ -131,6 +131,7 @@ def _menu_offer(v, area):
         "branch": v.get("branchName") or "",
         "rawCuisines": [l.strip() for l in labels if l.strip()],
         "cuisines": classify(labels, v["name"]),
+        "primary": primary([l.strip() for l in labels if l.strip()], v["name"]),
         "title": title,
         "detail": " · ".join(promos) if items and promos else "",
         "items": items,

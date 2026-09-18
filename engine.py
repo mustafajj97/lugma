@@ -78,6 +78,20 @@ def _slim(o):
     return o
 
 
+def normalize(o):
+    """Re-apply the current classification rules to an offer, so rule changes reach the live
+    data straight away instead of waiting for the next full refresh."""
+    if o["source"] == "talabat":
+        raw = o.get("rawCuisines") or []
+        o["cuisines"] = cuisine.classify(raw, o["restaurant"])
+        o["primary"] = cuisine.primary(raw, o["restaurant"])
+        for i in o.get("items", []):
+            i["cuisines"] = cuisine.classify(text=i["name"])
+    elif o["source"] == "news" and "news.google.com" in (o.get("url") or ""):
+        o["url"] = news.resolve_google_news(o["url"]) or o["url"]
+    return o
+
+
 def _stamp(o, source, cfg, t):
     """Give a freshly collected offer its validity window."""
     o["checkedAt"] = now_iso()
@@ -115,7 +129,7 @@ class Store:
         for o in offers:
             o["firstSeen"] = seen.setdefault(o["id"], t.isoformat())
         others = [o for o in self.db["offers"] if o["source"] != source]
-        self.db["offers"] = [o for o in others + [_slim(o) for o in offers] if _live(o, t)]
+        self.db["offers"] = [o for o in others + [_slim(normalize(o)) for o in offers] if _live(o, t)]
         live_ids = {o["id"] for o in self.db["offers"]}
         # forget first-seen dates of offers gone for a month (keeps state.json small)
         cutoff = (t - timedelta(days=30)).isoformat()
@@ -126,8 +140,14 @@ class Store:
         }
         self.save()
 
-    def save(self):
-        self.db["generatedAt"] = now_iso()
+    def normalize_all(self):
+        t = today()
+        self.db["offers"] = [normalize(o) for o in self.db["offers"] if _live(o, t)]
+
+    def save(self, touch=True):
+        """touch=False keeps "Updated …" at the last real collection (e.g. when only republishing)."""
+        if touch or not self.db.get("generatedAt"):
+            self.db["generatedAt"] = now_iso()
         self.db["cuisines"] = cuisine.ORDER
         save_json(self.offers_path, self.db)
         save_json(self.state_path, self.state)

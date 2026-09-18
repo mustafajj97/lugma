@@ -72,6 +72,42 @@ code { font: 12.5px ui-monospace, Consolas, monospace; background: var(--surface
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 #progLog { margin: 0; font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--ink-2); max-height: 110px; overflow: auto; white-space: pre-wrap; }
 
+/* cuisine + deal dropdowns (multi-select) */
+.pickers { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0 6px; align-items: center; }
+.picker { position: relative; }
+.picker-btn { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface); border-radius: 10px;
+  padding: 9px 12px; cursor: pointer; font-size: 14px; min-width: 190px; box-shadow: var(--shadow); width: 100%; }
+.picker-name { color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; flex: none; }
+.picker-value { font-weight: 600; flex: 1; text-align: left; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker.on .picker-btn { border-color: var(--accent); }
+.picker.on .picker-value { color: var(--accent); }
+.caret { color: var(--muted); font-size: 12px; }
+.picker-panel { position: absolute; top: calc(100% + 6px); left: 0; z-index: 15; width: 300px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: 0 16px 40px rgba(0,0,0,.2); padding: 6px; }
+.picker-head { font-weight: 700; padding: 8px 8px 4px; font-size: 14px; }
+.picker-head small { font-weight: 400; color: var(--muted); margin-left: 4px; }
+.picker-list { max-height: min(55vh, 440px); overflow: auto; overscroll-behavior: contain; }
+.pick { display: flex; align-items: center; gap: 10px; padding: 10px 8px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+.pick:hover { background: var(--surface-2); }
+.pick input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; flex: none; }
+.pick span { flex: 1; }
+.pick b { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+.pick.none { opacity: .45; }
+.picker-actions { display: flex; justify-content: space-between; align-items: center; padding: 8px 6px 4px; border-top: 1px solid var(--line); margin-top: 4px; }
+.picker-actions .btn { padding: 7px 18px; }
+.active { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.active:empty { display: none; }
+.active .chip { font-size: 12.5px; padding: 4px 10px; }
+.active .chip.deal { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* source link on every card */
+.source { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 2px; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface-2); color: var(--ink); text-decoration: none; font-size: 13.5px; font-weight: 600; }
+.source:hover { background: var(--accent-soft); }
+.source .host { color: var(--accent); font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 55%; }
+.source.none { color: var(--muted); font-weight: 500; }
+.match-line { color: var(--good); font-weight: 600; }
+
 /* chips + filters */
 .chips { display: flex; flex-wrap: wrap; gap: 7px; margin: 18px 0 12px; }
 .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 6px 12px; cursor: pointer; font-size: 13.5px; font-weight: 500; }
@@ -166,11 +202,27 @@ dialog input, dialog textarea, dialog select { border: 1px solid var(--line); ba
 @media (max-width: 640px) {
   .wrap { padding: 0 16px; }
   .tag { display: none; }
-  #addBtn { padding: 8px 10px; font-size: 13px; }
+  #addBtn { padding: 7px 13px; font-size: 18px; line-height: 1; }
+  #addBtn .lbl { display: none; }
+  .top-row { gap: 8px; }
+  .brand { gap: 9px; min-width: 0; }
+  .logo { width: 36px; height: 36px; font-size: 20px; flex: none; }
+  .top-actions { gap: 6px; flex: none; }
+  .btn.icon { padding: 7px 8px; }
+  .refresh #refreshBtn { padding: 8px 11px; }
+  .refresh .caret { padding: 8px 7px; }
+  .updated { white-space: nowrap; }
   h1 { font-size: 22px; }
   .grid { grid-template-columns: 1fr; }
   /* phone: filters fold away behind one button so results start near the top */
-  .filters-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 0; }
+  .filters-toggle { display: inline-flex; align-items: center; gap: 6px; margin: 2px 0 0; grid-column: 1 / -1; justify-content: center; }
+  .pickers { display: grid; grid-template-columns: 1fr 1fr; }
+  .picker-btn { min-width: 0; flex-direction: column; align-items: flex-start; gap: 1px; padding: 8px 12px; position: relative; }
+  .picker-btn .caret { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); }
+  .picker-value { max-width: calc(100% - 14px); }
+  /* on phones the list opens as a sheet from the bottom, easy to reach with a thumb */
+  .picker-panel { position: fixed; left: 10px; right: 10px; bottom: max(10px, env(safe-area-inset-bottom)); top: auto; width: auto; z-index: 40; }
+  .picker-list { max-height: 58vh; }
   .filters-toggle .count { background: var(--accent); color: var(--accent-ink); border-radius: 99px; font-size: 11px; padding: 0 6px; }
   .filters-toggle .count:empty { display: none; }
   .filters { display: none; }

@@ -2,7 +2,7 @@
 // - App files: served from cache, refreshed in the background (stale-while-revalidate).
 // - Offers data: always tries the network first so you see today's offers; falls back to the
 //   last copy when offline. The page itself hides anything past its end date either way.
-const CACHE = "lugma-v2";
+const CACHE = "lugma-v3";
 const SHELL = ["./", "index.html", "app.js", "style.css", "manifest.webmanifest", "icon.svg", "icon-180.png", "icon-192.png"];
 
 self.addEventListener("install", e => {

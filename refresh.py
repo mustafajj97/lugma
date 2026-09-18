@@ -62,7 +62,10 @@ if __name__ == "__main__":
         if not os.path.exists(os.path.join(engine.DATA_DIR, "offers.json")):
             log("Couldn't load the current offers — not republishing (would publish an empty app)")
             sys.exit(1)
-        log("No sources requested — republishing current offers")
+        store = engine.Store()
+        store.normalize_all()   # apply any rule changes + drop expired offers, without re-collecting
+        store.save(touch=False)
+        log(f"No sources requested — republishing {len(store.db['offers'])} current offers")
         sys.exit(0)
     failed = engine.run(wanted, log, progress)
     sys.exit(1 if "talabat" in failed else 0)

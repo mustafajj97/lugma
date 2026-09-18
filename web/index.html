@@ -29,7 +29,7 @@
       </div>
     </div>
     <div class="top-actions">
-      <button class="btn ghost" id="addBtn" title="Add an offer you saw">+ Add offer</button>
+      <button class="btn ghost" id="addBtn" title="Add an offer you saw" aria-label="Add an offer">+<span class="lbl"> Add offer</span></button>
       <button class="btn ghost icon" id="settingsBtn" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
       </button>
@@ -63,11 +63,30 @@
 
 <main class="wrap">
   <div class="stale" id="stale" hidden></div>
-  <div class="chips" id="cuisineChips" role="group" aria-label="Cuisine"></div>
-  <div class="chips deals" id="dealChips" role="group" aria-label="Deal type"></div>
+  <div class="pickers">
+    <div class="picker" id="cuisinePicker" data-kind="cuisine">
+      <button class="picker-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+        <span class="picker-name">Cuisine</span><span class="picker-value">All cuisines</span><span class="caret">▾</span></button>
+      <div class="picker-panel" hidden>
+        <div class="picker-head">Cuisine <small>pick as many as you like</small></div>
+        <div class="picker-list" role="listbox" aria-multiselectable="true"></div>
+        <div class="picker-actions"><button type="button" class="textbtn" data-clear>Clear</button><button type="button" class="btn primary" data-done>Done</button></div>
+      </div>
+    </div>
+    <div class="picker" id="dealPicker" data-kind="deals">
+      <button class="picker-btn" type="button" aria-haspopup="listbox" aria-expanded="false">
+        <span class="picker-name">Deal type</span><span class="picker-value">Any deal</span><span class="caret">▾</span></button>
+      <div class="picker-panel" hidden>
+        <div class="picker-head">Deal type <small>pick as many as you like</small></div>
+        <div class="picker-list" role="listbox" aria-multiselectable="true"></div>
+        <div class="picker-actions"><button type="button" class="textbtn" data-clear>Clear</button><button type="button" class="btn primary" data-done>Done</button></div>
+      </div>
+    </div>
+    <button class="btn ghost filters-toggle" id="filtersToggle" aria-expanded="false" aria-controls="filters">
+      Filters &amp; sort <span class="count" id="filterCount"></span> ▾</button>
+  </div>
+  <div class="active" id="activeFilters"></div>
 
-  <button class="btn ghost filters-toggle" id="filtersToggle" aria-expanded="false" aria-controls="filters">
-    Filters &amp; sort <span class="count" id="filterCount"></span> ▾</button>
   <div class="filters" id="filters">
     <div class="seg" id="channelSeg" role="group" aria-label="Where">
       <button data-v="all" class="on">All</button>

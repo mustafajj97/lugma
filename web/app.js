@@ -103,20 +103,35 @@ function prep(o) {
   if (o.deliveryFee === "0") o._deals.add("fdel");
   o._hay = [o.restaurant, o.handle, o.branch, o.title, o.detail, ...(o.cuisines || []), ...(o.rawCuisines || []),
             ...o.items.map(i => i.name + " " + (i.desc || ""))].join(" ").toLowerCase();
-  o._itemCuisines = new Set(o.items.flatMap(i => i.cuisines || []));
   o.validUntil = o.validUntil || o.expires || null;
   return o;
 }
 
 function tokens() { return state.q.toLowerCase().split(/\s+/).filter(Boolean); }
 
-// An item is "relevant" if it matches the search text or the selected cuisine
-function itemHit(i, toks) {
+// Cuisine matching works on DISHES: picking "Fried Chicken" shows a desi restaurant only if one of its
+// discounted dishes is fried chicken — unless fried chicken is the restaurant's main thing (KFC, a broast
+// place), where every dish counts.
+const mainCuisines = o => o.primary || o.cuisines || [];
+const itemCuisine = (o, i, c) => (i.cuisines || []).includes(c) || mainCuisines(o).includes(c);
+const offerCuisine = (o, c) => o.items.length ? o.items.some(i => itemCuisine(o, i, c)) : (o.cuisines || []).includes(c);
+const filtering = toks => toks.length || state.cuisine.size || state.deals.size;
+
+// Filters combine per DISH: with "Fried Chicken" + "Combos" picked, a dish must be a fried-chicken combo.
+// Within one dropdown any tick counts (Pizza OR Burgers).
+const textMatch = (i, toks) => {
   const t = (i.name + " " + (i.desc || "")).toLowerCase();
-  const textHit = toks.length && toks.every(k => t.includes(k) || (/^\d+%?$/.test(k) && i.pct >= parseInt(k)));
-  const cuisineHit = state.cuisine.size && (i.cuisines || []).some(c => state.cuisine.has(c));
-  const dealHit = state.deals.size && [...state.deals].some(d => i._deals.has(d));
-  return textHit || cuisineHit || dealHit;
+  return toks.every(k => t.includes(k) || (/^\d+%?$/.test(k) && i.pct >= parseInt(k)));
+};
+const cuisineOk = (o, i, set = state.cuisine) => !set.size || [...set].some(c => itemCuisine(o, i, c));
+// free delivery belongs to the restaurant, not a dish
+const dealOk = (o, i, set = state.deals) => !set.size || [...set].some(d => i._deals.has(d) || (d === "fdel" && o._deals.has(d)));
+
+// Does this dish match what you're looking for? textOnItems: whether the search words appear in any
+// of this restaurant's dishes (if they only match the restaurant's name, the dishes aren't filtered by them).
+function itemHit(o, i, toks, textOnItems = toks.length > 0 && o.items.some(x => textMatch(x, toks))) {
+  if (!state.cuisine.size && !state.deals.size && !textOnItems) return false;
+  return cuisineOk(o, i) && dealOk(o, i) && (!textOnItems || textMatch(i, toks));
 }
 
 function matches(o, toks, ignoreCuisine = false, ignoreDeals = false) {
@@ -127,8 +142,10 @@ function matches(o, toks, ignoreCuisine = false, ignoreDeals = false) {
   if (state.area && !(o.areas || []).includes(state.area)) return false;
   if (state.newOnly && !isNew(o, 7)) return false;
   if (!ignoreDeals && state.deals.size && ![...state.deals].some(d => o._deals.has(d))) return false;
+  if (o.items.length && !ignoreCuisine && !ignoreDeals && (state.cuisine.size || state.deals.size)
+      && !o.items.some(i => cuisineOk(o, i) && dealOk(o, i))) return false;
   if (!ignoreCuisine && state.cuisine.size) {
-    const any = [...state.cuisine].some(c => o.cuisines.includes(c) || o._itemCuisines.has(c));
+    const any = [...state.cuisine].some(c => offerCuisine(o, c));
     if (!any) return false;
   }
   for (const k of toks) {
@@ -153,7 +170,7 @@ function ago(iso) {
 
 function sorted(list) {
   const by = {
-    pct: (a, b) => b.maxPct - a.maxPct || b.items.length - a.items.length,
+    pct: (a, b) => (b._pct ?? b.maxPct) - (a._pct ?? a.maxPct) || (b._hits?.length || b.items.length) - (a._hits?.length || a.items.length),
     new: (a, b) => (b.date || b.firstSeen || "").localeCompare(a.date || a.firstSeen || ""),
     rating: (a, b) => (b.rating || 0) - (a.rating || 0),
     items: (a, b) => b.items.length - a.items.length,
@@ -164,29 +181,32 @@ function sorted(list) {
   return list.sort(by);
 }
 
-function buildDealChips() {
-  const toks = tokens();
-  const base = state.offers.filter(o => matches(o, toks, false, true));
-  $("#dealChips").innerHTML = `<span class="chip-label">Deal type</span>` +
-    `<button class="chip ${state.deals.size ? "" : "on"}" data-d="">Any deal</button>` +
-    DEALS.map(d => {
-      const n = base.filter(o => o._deals.has(d.id)).length;
-      return `<button class="chip deal ${state.deals.has(d.id) ? "on" : ""}" data-d="${d.id}" ${n || state.deals.has(d.id) ? "" : "disabled"}>${esc(d.label)}<b>${n}</b></button>`;
-    }).join("");
+function fillPicker(sel, rows, set, allLabel) {
+  const el = $(sel), list = el.querySelector(".picker-list"), top = list.scrollTop;
+  list.innerHTML = rows.map(r => `<label class="pick ${!r.n && !set.has(r.v) ? "none" : ""}">
+      <input type="checkbox" value="${esc(r.v)}" ${set.has(r.v) ? "checked" : ""}><span>${esc(r.label)}</span><b>${r.n}</b></label>`).join("");
+  list.scrollTop = top;
+  const picked = rows.filter(r => set.has(r.v)).map(r => r.label);
+  el.querySelector(".picker-value").textContent = !picked.length ? allLabel : picked.length <= 2 ? picked.join(", ") : `${picked[0]} +${picked.length - 1}`;
+  el.classList.toggle("on", picked.length > 0);
 }
 
-function buildChips() {
-  buildDealChips();
+function buildPickers() {
   const toks = tokens();
-  const base = state.offers.filter(o => matches(o, toks, true));
-  const count = c => base.filter(o => o.cuisines.includes(c) || o._itemCuisines.has(c)).length;
-  $("#cuisineChips").innerHTML =
-    `<button class="chip ${state.cuisine.size ? "" : "on"}" data-c="">All cuisines</button>` +
-    state.cuisines.map(c => {
-      const n = count(c);
-      return `<button class="chip ${state.cuisine.has(c) ? "on" : ""}" data-c="${esc(c)}" ${n || state.cuisine.has(c) ? "" : "disabled"}>${esc(c)}<b>${n}</b></button>`;
-    }).join("");
+  const baseC = state.offers.filter(o => matches(o, toks, true));          // counts ignore their own filter
+  const baseD = state.offers.filter(o => matches(o, toks, false, true));
+  const one = x => new Set([x]);
+  const nC = c => baseC.filter(o => o.items.length ? o.items.some(i => cuisineOk(o, i, one(c)) && dealOk(o, i)) : offerCuisine(o, c)).length;
+  const nD = d => baseD.filter(o => o.items.length && d !== "fdel" ? o.items.some(i => dealOk(o, i, one(d)) && cuisineOk(o, i)) : o._deals.has(d)).length;
+  fillPicker("#cuisinePicker", state.cuisines.map(c => ({ v: c, label: c, n: nC(c) })), state.cuisine, "All cuisines");
+  fillPicker("#dealPicker", DEALS.map(d => ({ v: d.id, label: d.label, n: nD(d.id) })), state.deals, "Any deal");
+  // what's selected, as removable chips under the dropdowns
+  $("#activeFilters").innerHTML =
+    [...state.cuisine].map(c => `<button class="chip on" data-rm-c="${esc(c)}">${esc(c)} ✕</button>`).join("") +
+    DEALS.filter(d => state.deals.has(d.id)).map(d => `<button class="chip deal" data-rm-d="${d.id}">${esc(d.label)} ✕</button>`).join("");
 }
+
+function buildChips() { buildPickers(); }
 
 function buildSources() {
   $("#sourceToggles").innerHTML = Object.entries(SOURCES).map(([k, s]) => {
@@ -228,6 +248,20 @@ function validity(o) {
 }
 function daysBetween(a, b) { return Math.round((Date.parse(b) - Date.parse(a)) / 864e5); }
 
+// Every card ends with where the offer came from, so it can be checked at the source
+function sourceLink(o) {
+  if (!o.url) return `<div class="source none">Source · added by you (no link)</div>`;
+  let host = "";
+  try { host = new URL(o.url).hostname.replace(/^www\./, ""); } catch {}
+  const what = {
+    talabat: "Check on Talabat",
+    instagram: o.handle ? `Instagram post by @${esc(o.handle)}` : "Open the Instagram post",
+    news: `Read the story${o.restaurant && o.restaurant !== "News" ? ` · ${esc(o.restaurant)}` : ""}`,
+    manual: "Open your link",
+  }[o.source] || "Open source";
+  return `<a class="source" href="${esc(o.url)}" target="_blank" rel="noopener"><span>Source · ${what}</span><span class="host">${esc(host)} ↗</span></a>`;
+}
+
 function card(o, toks) {
   const src = SOURCES[o.source];
   const initials = esc((o.restaurant || "?").replace(/[^A-Za-z؀-ۿ ]/g, "").trim().slice(0, 1).toUpperCase() || "?");
@@ -250,14 +284,18 @@ function card(o, toks) {
 
   let body = "";
   if (o.items.length) {
-    const hits = o.items.filter(i => itemHit(i, toks));
+    const hits = o._hits || o.items.filter(i => itemHit(o, i, toks));
     const rest = o.items.filter(i => !hits.includes(i));
     const ordered = [...hits, ...rest];
-    const head = ordered.slice(0, Math.max(4, Math.min(hits.length, 8)));
+    const focused = o._focused ?? (filtering(toks) && hits.length > 0);      // a filter is on: list only what matched
+    const head = focused ? hits.slice(0, 8) : ordered.slice(0, 4);
     const li = i => `<li><span class="nm ${hits.includes(i) ? "hit" : ""}">${hl(i.name, toks)}</span><span><s>${bd(i.was)}</s> <span class="now">${bd(i.now)}</span></span><span class="off">−${i.pct}%</span></li>`;
-    body = `<div class="offer-line">${esc(o.title)}${hits.length && (toks.length || state.cuisine.size || state.deals.size) ? ` · <span style="color:var(--good)">${hits.length} match${hits.length > 1 ? "es" : ""}</span>` : ""}</div>
+    body = focused
+      ? `<div class="offer-line"><span class="match-line">${hits.length} matching dish${hits.length > 1 ? "es" : ""}${hits.length > 1 ? ` · up to ${o._pct}% off` : ` · ${o._pct}% off`}</span></div>`
+      : `<div class="offer-line">${esc(o.title)}</div>`;
+    body += `
       <ul class="items" data-all="${o.items.length}">${head.map(li).join("")}</ul>
-      ${ordered.length > head.length ? `<button class="textbtn" data-expand="${esc(o.id)}">Show all ${o.items.length} items</button>` : ""}`;
+      ${ordered.length > head.length ? `<button class="textbtn" data-expand="${esc(o.id)}">${focused ? `Show all ${o.items.length} discounted items` : `Show all ${o.items.length} items`}</button>` : ""}`;
     if (o.detail) body += `<div class="caption">${hl(o.detail, toks)}</div>`;
   } else {
     body = o.source === "instagram"
@@ -270,11 +308,12 @@ function card(o, toks) {
   return `<article class="card">
     <div class="card-head">${logo}
       <div class="card-title"><h3>${hl(o.restaurant, toks)}</h3><div class="meta">${meta.join("<span>·</span>")}</div></div>
-      ${o.maxPct ? `<span class="pct">${o.items.length > 1 ? "≤" : ""}${o.maxPct}%</span>` : ""}
+      ${(o._pct ?? o.maxPct) ? `<span class="pct">${(o._focused ? o._hits.length : o.items.length) > 1 ? "≤" : ""}${o._pct ?? o.maxPct}%</span>` : ""}
     </div>
     <div class="badges">${badges.join("")}</div>
     ${body}
-    <div class="card-foot">${areas}<span style="display:flex;gap:12px">${del}${o.url ? `<a class="link" href="${esc(o.url)}" target="_blank" rel="noopener">${src.link} ↗</a>` : ""}</span></div>
+    ${areas !== "<span></span>" || del ? `<div class="card-foot">${areas}${del}</div>` : ""}
+    ${sourceLink(o)}
   </article>`;
 }
 
@@ -282,14 +321,22 @@ let current = [];
 function render(resetPage = false) {
   if (resetPage) state.shown = PAGE;
   const toks = tokens();
-  current = sorted(state.offers.filter(o => matches(o, toks)));
-  const items = current.reduce((n, o) => n + o.items.length, 0);
+  const focus = filtering(toks);
+  current = state.offers.filter(o => matches(o, toks));
+  for (const o of current) {
+    const onItems = toks.length > 0 && o.items.some(x => textMatch(x, toks));
+    o._hits = o.items.filter(i => itemHit(o, i, toks, onItems));
+    o._focused = focus && o._hits.length > 0;
+    o._pct = o._focused ? Math.max(...o._hits.map(i => i.pct)) : o.maxPct;   // best deal among what you asked for
+  }
+  current = sorted(current);
+  const items = current.reduce((n, o) => n + (o._focused ? o._hits.length : o.items.length), 0);
   $("#results").innerHTML = current.slice(0, state.shown).map(o => card(o, toks)).join("");
   $("#moreBtn").hidden = current.length <= state.shown;
   $("#moreBtn").textContent = `Show more (${current.length - state.shown} left)`;
   const bySrc = Object.keys(SOURCES).map(k => [k, current.filter(o => o.source === k).length]).filter(x => x[1]);
   $("#summary").innerHTML = current.length
-    ? `<strong>${current.length.toLocaleString()}</strong> offers${items ? ` · ${items.toLocaleString()} discounted menu items` : ""} · ${bySrc.map(([k, n]) => `${n} ${SOURCES[k].label}`).join(", ")}`
+    ? `<strong>${current.length.toLocaleString()}</strong> offers${items ? ` · ${items.toLocaleString()} ${current.some(o => o._focused) ? "matching dishes" : "discounted menu items"}` : ""} · ${bySrc.map(([k, n]) => `${n} ${SOURCES[k].label}`).join(", ")}`
     : "";
   const empty = $("#empty");
   empty.hidden = current.length > 0;
@@ -567,18 +614,35 @@ $("#filtersToggle").addEventListener("click", () => {
 });
 let tq;
 $("#q").addEventListener("input", e => { clearTimeout(tq); tq = setTimeout(() => { state.q = e.target.value.trim(); render(true); }, 120); });
-$("#dealChips").addEventListener("click", e => {
-  const b = e.target.closest("[data-d]"); if (!b) return;
-  const d = b.dataset.d;
-  if (!d) state.deals.clear();
-  else state.deals.has(d) ? state.deals.delete(d) : state.deals.add(d);
-  remember(); render(true);
+function closePickers() {
+  document.querySelectorAll(".picker-panel").forEach(p => { p.hidden = true; });
+  document.querySelectorAll(".picker-btn").forEach(b => b.setAttribute("aria-expanded", "false"));
+}
+document.querySelectorAll(".picker").forEach(p => {
+  const btn = p.querySelector(".picker-btn"), panel = p.querySelector(".picker-panel");
+  const set = () => p.dataset.kind === "cuisine" ? state.cuisine : state.deals;
+  btn.addEventListener("click", e => {
+    e.stopPropagation();
+    const opening = panel.hidden;
+    closePickers();
+    panel.hidden = !opening;
+    btn.setAttribute("aria-expanded", opening);
+  });
+  panel.addEventListener("click", e => e.stopPropagation());
+  panel.addEventListener("change", e => {
+    const v = e.target.value;
+    e.target.checked ? set().add(v) : set().delete(v);
+    remember(); render(true);
+  });
+  panel.querySelector("[data-clear]").addEventListener("click", () => { set().clear(); remember(); render(true); });
+  panel.querySelector("[data-done]").addEventListener("click", closePickers);
 });
-$("#cuisineChips").addEventListener("click", e => {
-  const b = e.target.closest("[data-c]"); if (!b) return;
-  const c = b.dataset.c;
-  if (!c) state.cuisine.clear();
-  else state.cuisine.has(c) ? state.cuisine.delete(c) : state.cuisine.add(c);
+document.addEventListener("click", closePickers);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closePickers(); });
+$("#activeFilters").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.rmC) state.cuisine.delete(b.dataset.rmC);
+  if (b.dataset.rmD) state.deals.delete(b.dataset.rmD);
   remember(); render(true);
 });
 $("#channelSeg").addEventListener("click", e => {
@@ -601,7 +665,9 @@ $("#results").addEventListener("click", async e => {
     const o = state.offers.find(o => o.id === x.dataset.expand);
     const toks = tokens();
     const ul = x.previousElementSibling;
-    ul.innerHTML = o.items.map(i => `<li><span class="nm ${itemHit(i, toks) ? "hit" : ""}">${hl(i.name, toks)}</span><span><s>${bd(i.was)}</s> <span class="now">${bd(i.now)}</span></span><span class="off">−${i.pct}%</span></li>`).join("");
+    const hitSet = new Set(o._hits || []);
+    const sortedItems = [...o.items.filter(i => hitSet.has(i)), ...o.items.filter(i => !hitSet.has(i))];
+    ul.innerHTML = sortedItems.map(i => `<li><span class="nm ${hitSet.has(i) ? "hit" : ""}">${hl(i.name, toks)}</span><span><s>${bd(i.was)}</s> <span class="now">${bd(i.now)}</span></span><span class="off">−${i.pct}%</span></li>`).join("");
     x.remove();
     return;
   }

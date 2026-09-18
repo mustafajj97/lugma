@@ -12,7 +12,8 @@ CANON = {
     "Biryani":       ({"biryani"}, r"\b(biryani|biriyani|pulao|pulav)\b"),
     "Burgers":       ({"burgers", "burger", "american", "hot dogs"}, r"\b(burgers?|smash|sliders?|cheeseburger)\b"),
     "Pizza":         ({"pizza"}, r"\b(pizzas?|pepperoni|margherita)\b"),
-    "Fried Chicken": ({"fried chicken", "broasted", "chicken"}, r"\b(broast(ed)?|fried chicken|crispy chicken|wings|nuggets|strips|zinger|tenders)\b"),
+    # Talabat's plain "Chicken" label covers grills/shawarma too, so it deliberately doesn't count here
+    "Fried Chicken": ({"fried chicken", "broasted", "wings"}, r"\b(broast(ed)?|fried chicken|crispy chicken|wings|nuggets|strips|zinger|tenders|chicken bites|popcorn chicken|chicken bucket|bucket)\b"),
     "Shawarma":      ({"shawarma", "wraps"}, r"\b(shawarma|shawerma|shawurma)\b"),
     "Arabic":        ({"arabic", "bahraini", "middle eastern", "yemeni", "saudi", "mandi", "emirati", "iraqi", "syrian", "egyptian", "moroccan", "khaleeji", "manaqeesh", "falafel", "mezze"},
                       r"\b(mandi|madhbi|machboos|majboos|kabsa|harees|madghoot|madfoon|bukhari|mezze|hummus|manakish|manaqeesh|falafel|foul|khaleeji)\b"),
@@ -49,6 +50,13 @@ _AR = {
     "Pakistani": "باكستاني", "Indian": "هندي", "Lebanese": "لبناني", "Turkish": "تركي", "Bakery": "مخبز|معجنات",
 }
 _AR_RX = {c: re.compile(rx) for c, rx in _AR.items()}
+
+
+def primary(labels, name):
+    """A restaurant's main cuisine(s): its FIRST source label plus what its name says
+    (e.g. "Pizza Hut", "Bazooka Fried Chicken"). Used so that picking a cuisine shows every
+    dish at a specialist, but only the matching dishes at a place where it's a side line."""
+    return classify(list(labels)[:1], name)
 
 
 def classify(labels=(), text=""):
