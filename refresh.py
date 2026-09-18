@@ -58,5 +58,11 @@ if __name__ == "__main__":
     if a.prev_url:
         fetch_previous(a.prev_url)
     wanted = [s for s in ("news", "instagram", "talabat") if s in a.sources.split(",")]
+    if not wanted:   # "none": just republish the current offers (used when the app's code changes)
+        if not os.path.exists(os.path.join(engine.DATA_DIR, "offers.json")):
+            log("Couldn't load the current offers — not republishing (would publish an empty app)")
+            sys.exit(1)
+        log("No sources requested — republishing current offers")
+        sys.exit(0)
     failed = engine.run(wanted, log, progress)
     sys.exit(1 if "talabat" in failed else 0)

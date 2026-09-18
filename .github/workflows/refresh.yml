@@ -1,6 +1,9 @@
 name: Refresh offers
 
 on:
+  push:                       # app changes go live in ~1 min (republishes current offers, no re-collecting)
+    branches: [main]
+    paths-ignore: [".last-refresh", "README.md"]
   schedule:
     - cron: "0 3 * * *"      # every day at 06:00 Bahrain time
   workflow_dispatch:          # the app's Refresh button (or "Run workflow" on GitHub)
@@ -44,14 +47,16 @@ jobs:
       - name: Collect offers
         id: collect
         continue-on-error: true
-        run: python refresh.py --sources "${{ inputs.sources || 'news,instagram,talabat' }}" --prev-url "${{ steps.pages.outputs.base_url }}"
+        run: python refresh.py --sources "${{ github.event_name == 'push' && 'none' || inputs.sources || 'news,instagram,talabat' }}" --prev-url "${{ steps.pages.outputs.base_url }}"
 
       # Publish even if a source failed: expired offers still need removing, other sources still update
       - uses: actions/upload-pages-artifact@v3
+        if: steps.collect.outcome == 'success' || github.event_name != 'push'
         with:
           path: web
 
       - id: deploy
+        if: steps.collect.outcome == 'success' || github.event_name != 'push'
         uses: actions/deploy-pages@v4
 
       # GitHub pauses scheduled jobs in public repos after 60 days without a commit.
